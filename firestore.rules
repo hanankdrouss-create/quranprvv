@@ -1,0 +1,186 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitive Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function isHardcodedAdmin() {
+      return isSignedIn() && request.auth.token.email == 'hananbouzittt@gmail.com';
+    }
+
+    function canAccessChat(chatId) {
+      return isSignedIn() && (request.auth.uid == chatId || isAdmin() || isHardcodedAdmin());
+    }
+
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isValidId(id) { 
+      // Allows letters, numbers, hyphens, and underlines
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validation Blueprints
+    function isValidUserShape(data) {
+      return data.keys().hasAll(['userId', 'email', 'role', 'createdAt', 'updatedAt', 'isBanned', 'trialUsed'])
+        && (data.keys().size() >= 7 && data.keys().size() <= 13)
+        && data.userId is string && data.userId.size() <= 128
+        && data.email is string && data.email.size() <= 128
+        && data.role is string && data.role in ['user', 'vip', 'admin']
+        && data.isBanned is bool
+        && data.trialUsed is bool
+        && (!('trialExpiry' in data) || data.trialExpiry == null || data.trialExpiry is timestamp)
+        && (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 100))
+        && (!('muezzinId' in data) || data.muezzinId == null || (data.muezzinId is string && data.muezzinId.size() <= 50))
+        && (!('locationId' in data) || data.locationId == null || (data.locationId is string && data.locationId.size() <= 50))
+        && (!('notificationBackground' in data) || data.notificationBackground == null || (data.notificationBackground is string && data.notificationBackground.size() <= 500))
+        && (!('notificationName' in data) || data.notificationName == null || (data.notificationName is string && data.notificationName.size() <= 100))
+        && (!('socialMediaLink' in data) || data.socialMediaLink == null || (data.socialMediaLink is string && data.socialMediaLink.size() <= 200));
+    }
+
+    function isValidUserShapeForUpdate(data) {
+      return (!('userId' in data) || (data.userId is string && data.userId.size() <= 128))
+        && (!('email' in data) || (data.email is string && data.email.size() <= 128))
+        && (!('role' in data) || (data.role is string && data.role in ['user', 'vip', 'admin']))
+        && (!('isBanned' in data) || data.isBanned is bool)
+        && (!('trialUsed' in data) || data.trialUsed is bool)
+        && (!('trialExpiry' in data) || data.trialExpiry == null || data.trialExpiry is timestamp)
+        && (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 100))
+        && (!('muezzinId' in data) || data.muezzinId == null || (data.muezzinId is string && data.muezzinId.size() <= 50))
+        && (!('locationId' in data) || data.locationId == null || (data.locationId is string && data.locationId.size() <= 50))
+        && (!('notificationBackground' in data) || data.notificationBackground == null || (data.notificationBackground is string && data.notificationBackground.size() <= 600))
+        && (!('notificationName' in data) || data.notificationName == null || (data.notificationName is string && data.notificationName.size() <= 100))
+        && (!('notificationSound' in data) || data.notificationSound == null || (data.notificationSound is string && data.notificationSound.size() <= 100))
+        && (!('socialMediaLink' in data) || data.socialMediaLink == null || (data.socialMediaLink is string && data.socialMediaLink.size() <= 200))
+        && (!('updatedAt' in data) || data.updatedAt == request.time);
+    }
+
+    function isValidQuranProgress(data) {
+      return data.keys().hasAll(['lastReadSurah', 'lastReadAyah', 'lastReadPage', 'updatedAt'])
+        && (data.keys().size() == 4 || data.keys().size() == 5) // Handle optional userId or not
+        && data.lastReadSurah is number 
+        && data.lastReadAyah is number 
+        && data.lastReadPage is number 
+        && data.updatedAt == request.time;
+    }
+
+    function isValidFavorite(data) {
+      return data.keys().hasAll(['type', 'itemId', 'createdAt'])
+        && (data.keys().size() == 3 || data.keys().size() == 4)
+        && data.type is string && data.type in ['surah', 'adhkar']
+        && data.itemId is string && data.itemId.size() <= 128
+        && data.createdAt == request.time;
+    }
+
+    function isValidReminder(data) {
+      return data.keys().hasAll(['title', 'time', 'days', 'isActive', 'createdAt'])
+        && (data.keys().size() >= 5 && data.keys().size() <= 6)
+        && data.title is string && data.title.size() <= 100
+        && data.time is string && data.time.size() <= 10
+        && data.days is list && data.days.size() <= 7 
+        && (data.days.size() == 0 || data.days[0] is number)
+        && data.isActive is bool
+        && (!('sound' in data) || data.sound == null || (data.sound is string && data.sound.size() <= 50))
+        && data.createdAt == request.time;
+    }
+
+    // Rules
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId);
+      allow list: if isAdmin() || isHardcodedAdmin(); // Only admins can list users
+      
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId
+        && isValidUserShape(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && incoming().userId == request.auth.uid
+        // Prevent self-assigned roles & unbanning except specific admin email
+        && (incoming().role == 'user' || (incoming().role == 'admin' && request.auth.token.email == 'hananbouzittt@gmail.com'))
+        && incoming().isBanned == false;
+
+      allow update: if isSignedIn() && isValidId(userId) && isValidUserShapeForUpdate(incoming()) && (
+        (request.auth.uid == userId &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'muezzinId', 'locationId', 'notificationBackground', 'notificationName', 'notificationSound', 'socialMediaLink', 'updatedAt'])
+        )
+        || 
+        ((isAdmin() || isHardcodedAdmin()) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'isBanned', 'updatedAt'])
+        )
+        ||
+        (request.auth.uid == userId && request.auth.token.email == 'hananbouzittt@gmail.com' &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt']) && incoming().role == 'admin'
+        )
+        ||
+        (request.auth.uid == userId &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['role', 'trialUsed', 'trialExpiry', 'updatedAt']) &&
+          incoming().role == 'vip' &&
+          incoming().trialUsed == true &&
+          existing().trialUsed == false
+        )
+      ) && incoming().updatedAt == request.time
+        && (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt);
+
+      // Subcollections
+      match /progress/{progressId} {
+        allow get, list: if isSignedIn() && request.auth.uid == userId;
+
+        allow update: if isSignedIn() && isValidId(progressId) && request.auth.uid == userId
+          && isValidQuranProgress(incoming())
+          // Using strict subset logic for update
+          && incoming().diff(existing()).affectedKeys().hasOnly(['lastReadSurah', 'lastReadAyah', 'lastReadPage', 'updatedAt']);
+
+        allow create: if isSignedIn() && isValidId(progressId) && request.auth.uid == userId
+          && isValidQuranProgress(incoming());
+      }
+      
+      match /favorites/{favoriteId} {
+        allow get, list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() && isValidId(favoriteId) && request.auth.uid == userId
+          && isValidFavorite(incoming());
+          
+        // Favorites shouldn't really be updated, just deleted and re-created
+        allow delete: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      match /reminders/{reminderId} {
+        allow get, list: if isSignedIn() && request.auth.uid == userId;
+
+        allow create: if isSignedIn() && isValidId(reminderId) && request.auth.uid == userId
+          && isValidReminder(incoming());
+
+        allow update: if isSignedIn() && isValidId(reminderId) && request.auth.uid == userId
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'time', 'days', 'isActive', 'sound'])
+          && incoming().createdAt == existing().createdAt;
+
+        allow delete: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    match /banned_chats {
+      allow read, write: if isAdmin() || isHardcodedAdmin();
+      
+      match /{chatId} {
+        allow read, write: if isAdmin() || isHardcodedAdmin() || request.auth.uid == chatId;
+        
+        match /{messages=**} {
+            allow read, write: if isAdmin() || isHardcodedAdmin() || request.auth.uid == chatId;
+        }
+      }
+    }
+  }
+}

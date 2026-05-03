@@ -1,0 +1,8 @@
+{
+  "name": "quran",
+  "description": "تطبيق مواقيت الصلاة والأذان",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": []
+}

@@ -1,0 +1,80 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile containing basic info, role, and settings.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "vip", "admin"] },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" },
+        "isBanned": { "type": "boolean" },
+        "muezzinId": { "type": "string" },
+        "locationId": { "type": "string" },
+        "notificationBackground": { "type": "string" },
+        "notificationName": { "type": "string" },
+        "notificationSound": { "type": "string" },
+        "socialMediaLink": { "type": "string" }
+      },
+      "required": ["userId", "email", "role", "createdAt", "updatedAt", "isBanned"]
+    },
+    "QuranProgress": {
+      "title": "Quran Progress",
+      "description": "Tracks the user's progress in reading the Quran.",
+      "type": "object",
+      "properties": {
+        "lastReadSurah": { "type": "number" },
+        "lastReadAyah": { "type": "number" },
+        "lastReadPage": { "type": "number" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["lastReadSurah", "lastReadAyah", "lastReadPage", "updatedAt"]
+    },
+    "Favorite": {
+      "title": "Favorite Item",
+      "description": "User's favorite adhkar or verse.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["surah", "adhkar"] },
+        "itemId": { "type": "string" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["type", "itemId", "createdAt"]
+    },
+    "Reminder": {
+      "title": "Reminder",
+      "description": "User's custom reminder.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "time": { "type": "string" },
+        "days": { "type": "array", "items": { "type": "number" } },
+        "isActive": { "type": "boolean" },
+        "sound": { "type": "string" },
+        "createdAt": { "type": "timestamp" }
+      },
+      "required": ["title", "time", "days", "isActive", "createdAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profile collection."
+    },
+    "users/{userId}/progress/quran": {
+      "schema": { "$ref": "#/entities/QuranProgress" },
+      "description": "User's Quran progress. Document ID is usually 'quran'."
+    },
+    "users/{userId}/favorites/{favoriteId}": {
+      "schema": { "$ref": "#/entities/Favorite" },
+      "description": "User's favorite items."
+    },
+    "users/{userId}/reminders/{reminderId}": {
+      "schema": { "$ref": "#/entities/Reminder" },
+      "description": "User's custom reminders."
+    }
+  }
+}
